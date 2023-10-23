@@ -1,0 +1,3 @@
+[submodule "dLuxToliman"]
+	path = dLuxToliman
+	url = https://github.com/maxecharles/dLuxToliman.git
