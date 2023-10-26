@@ -8,7 +8,9 @@ class HelperFunctions:
         pass
 
     @staticmethod
-    def mesh_to_stl(X, Y, Z, N, file_name, unit_in="m", unit_out="mm", binary=True):
+    def mesh_to_stl(
+        X, Y, Z, N, file_name, unit_in="m", unit_out="mm", binary=True
+    ):
         """
         Inputs:
             X: 2D numpy array of values defining the x position of each pixel
@@ -27,8 +29,9 @@ class HelperFunctions:
                 [0.8 0.8 0.8 0.8 0.8 0.8 0.8 0.8 0.8 0.8]
                 [0.9 0.9 0.9 0.9 0.9 0.9 0.9 0.9 0.9 0.9]]
 
-            Z: 2D numpy array of values defining the z position (height) of each pixel
-            using plt.imshow(Z) should yeild a 'surface map' type image
+            Z: 2D numpy array of values defining the z position (height) of
+            each pixel using plt.imshow(Z) should yeild a 'surface map' type
+            image
 
             N: The number of pixels in the array, ie X, Y, Z should all be NxN
 
@@ -37,39 +40,43 @@ class HelperFunctions:
             unit_in: The input units of the X, Y, Z arrays. Default is meters.
             Can be 'm', 'mm', 'um', 'nm'
 
-            unit_out: The output units of the stl file. ie for a 1x1m sized mesh object
-            with units in mm we expect the X, Y output to range from 0 to 900. Default
-            is milimeters. Can be 'm', 'mm', 'um', 'nm'
+            unit_out: The output units of the stl file. ie for a 1x1m sized
+            mesh object with units in mm we expect the X, Y output to range
+            from 0 to 900. Default is milimeters. Can be 'm', 'mm', 'um', 'nm'
 
-            binary: If True file will be output as binary (smaller), else ASCII (readable)
+            binary: If True file will be output as binary (smaller), else
+            ASCII (readable)
 
         Output:
             returns None, saves an stl file to disk
 
         -------------------------------------------------------------------
         Algorithm:
-            Method: Decompose the traversal pattern into a series of simpler patters
-            and combine them to get the final pattern.
+            Method: Decompose the traversal pattern into a series of simpler
+            patterns and combine them to get the final pattern.
 
-            For a gridsize of N, we have N-1 squares in each row/column, giving a
-            total of (N-1)^2 sqaures and 2*(N-1)^2 triangles
+            For a gridsize of N, we have N-1 squares in each row/column,
+            giving a total of (N-1)^2 sqaures and 2*(N-1)^2 triangles
 
-            Each triangle is composed of three points and a so a square is made of 6 points
+            Each triangle is composed of three points and a so a square is
+            made of 6 points
 
-            Within the series of points there is a repeating pattern which can be
-            decomposed into thee different sequences and combines
+            Within the series of points there is a repeating pattern which can
+            be decomposed into thee different sequences and combines
 
             S1: [0,0,0], [1,1,1], [1,1,1], [2,2,2], [2,2,2], [3,3,3], ...
             S2: [0,0,1], [0,0,1], [0,0,1], [0,0,1], [0,0,1], [0,0,1], ...
             S3: [N,N,N], [0,0,0], [N,N,N], [0,0,0], [N,N,N], [0,0,0], ...
-            Combining these together gives us our repeating pattern, S = S1 + S2 + S3
+            Combining these together gives us our repeating pattern,
+            S = S1 + S2 + S3
 
-            Note: These brackes are there to help define the repeating sequence and
-            do not relate to the final grouping into triangles.
+            Note: These brackes are there to help define the repeating
+            sequence and do not relate to the final grouping into triangles.
 
-            The final sequence is then [0, 1, S, N-1] and represents a full row of triangles
-            This final sequence is then repeated again with N added to each value, then
-            again with 2*N added to each value and so on.
+            The final sequence is then [0, 1, S, N-1] and represents a full
+            row of triangles. This final sequence is then repeated again
+            with N added to each value, then again with 2*N added to each
+            value and so on.
         """
         import numpy as np
 
@@ -99,7 +106,6 @@ class HelperFunctions:
 
         # Other Numer of trianges and squares
         squares_per_row = N - 1
-        triangles_per_row = 2 * squares_per_row
         num_squares = squares_per_row**2
         num_triangles = 2 * num_squares
 
@@ -144,9 +150,13 @@ class HelperFunctions:
         arr_x = np.linspace(
             0, full_sequence_size, num=full_sequence_size, endpoint=False
         )
-        arr_y = np.linspace(0, squares_per_row, num=squares_per_row, endpoint=False)
+        arr_y = np.linspace(
+            0, squares_per_row, num=squares_per_row, endpoint=False
+        )
         X, Y = np.meshgrid(arr_x, arr_y)
-        incremental_sequence = N * Y.flatten()  # Flatten here in order to combine
+        incremental_sequence = (
+            N * Y.flatten()
+        )  # Flatten here in order to combine
 
         # Combine sequences together to create final array
         full_sequence_flat = base_sequence + incremental_sequence
@@ -160,7 +170,9 @@ class HelperFunctions:
         faces = full_sequence
 
         # Create the mesh object
-        grid_mesh = stl.mesh.Mesh(np.zeros(faces.shape[0], dtype=stl.mesh.Mesh.dtype))
+        grid_mesh = stl.mesh.Mesh(
+            np.zeros(faces.shape[0], dtype=stl.mesh.Mesh.dtype)
+        )
 
         # input mesh vectors
         for i, f in enumerate(faces):
@@ -219,7 +231,8 @@ class HelperFunctions:
         # Creating gratings
         grating = (amplitude * np.cos(B * Y) + amplitude * np.cos(B * X)) / 4
         anti_grating = (
-            amplitude * np.cos(B * Y + np.pi) + amplitude * np.cos(B * X + np.pi)
+            amplitude * np.cos(B * Y + np.pi)
+            + amplitude * np.cos(B * X + np.pi)
         ) / 4
 
         # Note here we divide the output by 4:
@@ -233,8 +246,8 @@ class HelperFunctions:
     def phase_to_depth(phase_array, wavelength, n1, n2):
         """
         Converts phase values to a depth for a specified wavelength through
-        a substrate with refractive index n2, relative to the 'null' substrate with
-        refractive index n1 (typically 1 for free space).
+        a substrate with refractive index n2, relative to the 'null' substrate
+        with refractive index n1 (typically 1 for free space).
 
         Parameters
         ----------
@@ -273,7 +286,9 @@ class HelperFunctions:
         """
         ratio = phase_mask.shape[0] / aperture_npix
         scaled_mask = dlu.scale(phase_mask, aperture_npix, ratio)
-        scaled_mask = scaled_mask.at[np.where(scaled_mask >= np.pi / 2)].set(np.pi)
+        scaled_mask = scaled_mask.at[np.where(scaled_mask >= np.pi / 2)].set(
+            np.pi
+        )
         scaled_mask = scaled_mask.at[np.where(scaled_mask < np.pi / 2)].set(0)
         return scaled_mask
 
@@ -292,7 +307,8 @@ class HelperFunctions:
         Parameters
         ----------
         max_reach: float, ratio
-            Maximum wavelength to diffract to 'max_reach' to the edge of the chip
+            Maximum wavelength to diffract to 'max_reach' to the edge of the
+            chip
         pixel_scale: float, radians
             Pixel scale of the detector
         det_npixels: int
@@ -309,7 +325,9 @@ class HelperFunctions:
         period: float
             Period of the grating
         """
-        diffraction_angle = max_reach * pixel_scale * np.sqrt(2) * (det_npixels / 2)
+        diffraction_angle = (
+            max_reach * pixel_scale * np.sqrt(2) * (det_npixels / 2)
+        )
         period = wavelengths.max() / np.sin(diffraction_angle)
         grating_sampling = period / (aperture_diameter / aperture_npix)
         print(f"Grating amplitude: {grating_sampling}")
@@ -363,7 +381,9 @@ class HelperFunctions:
         """
 
         # Generate a set of coordinates
-        coords = dlu.pixel_coords(aperture_npix * oversample, aperture_diameter)
+        coords = dlu.pixel_coords(
+            aperture_npix * oversample, aperture_diameter
+        )
 
         # Create the aperture and mirror
         primary = dlu.circle(coords, aperture_diameter)
@@ -449,12 +469,16 @@ class HelperFunctions:
         # support = aperture.transmission
 
         # Scale mask
-        scaled_mask = HelperFunctions.scale_binary_mask(phase_mask, aperture_npix)
+        scaled_mask = HelperFunctions.scale_binary_mask(
+            phase_mask, aperture_npix
+        )
 
         # Calculate depth
         # mask = phase_to_opd(scaled_mask, wavelengths.mean())
         # mask = phase_to_depth(scaled_mask, wavelengths.mean() * 1e-9, n1, n2)
-        mask = HelperFunctions.phase_to_depth(scaled_mask, wavelengths.mean(), n1, n2)
+        mask = HelperFunctions.phase_to_depth(
+            scaled_mask, wavelengths.mean(), n1, n2
+        )
 
         # Calculate grating period
         period = HelperFunctions.calculate_grating_period(
