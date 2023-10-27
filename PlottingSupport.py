@@ -4,7 +4,7 @@ import jax.numpy as np
 
 class Plotting:
     @staticmethod
-    def print_colormap(
+    def printColormap(
         array: np.ndarray,
         title: str = "",
         colormap: str = "viridis",

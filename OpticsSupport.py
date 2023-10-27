@@ -1,6 +1,7 @@
 import jax.numpy as np
 import stl
 import dLux.utils as dlu
+import dLuxToliman as dlT
 
 
 class HelperFunctions:
@@ -519,3 +520,46 @@ class HelperFunctions:
             return full_mask, mask, X, Y
         else:
             return full_mask
+
+    @staticmethod
+    def createPhaseMask(
+        raw_mask: np.ndarray, mean_wavelength: float, n1: float, n2: float
+    ):
+        """Creates a phase mask from a raw mask
+
+        Args:
+            raw_mask (np.ndarray): Raw grating mask
+            mean_wavelength (float): Mean wavelength of the bandpass
+            n1 (float): Refractive index of free space
+            n2 (float): Refractive index of the substrate
+
+        Returns:
+            phase_mask (np.ndarray): Full phase mask
+        """
+        opd_mask = raw_mask * (n2 - n1)
+        phase_mask = dlu.opd2phase(opd_mask, mean_wavelength)
+
+        return phase_mask
+
+    @staticmethod
+    def createTolimanTelescope(optics, source, ratio: float = 1):
+        """Creates a Toliman Telescope
+
+        Args:
+            optics (Optics): Optics object
+            source (Source): Source object
+            ratio (float, optional): Ratio that scales the size of the pupil
+            and telescope. Defaults to 1.
+        Returns:
+            instrument: Telescope object
+        """
+        instrument = dlT.Toliman(optics, source)
+        instrument = instrument.set("diameter", instrument.diameter / ratio)
+        instrument = instrument.set(
+            "psf_pixel_scale", instrument.psf_pixel_scale * ratio
+        )
+        instrument = instrument.set(
+            "source.separation", instrument.source.separation * ratio
+        )
+
+        return instrument
