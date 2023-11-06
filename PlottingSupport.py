@@ -7,7 +7,7 @@ class Plotting:
     def printColormap(
         array: np.ndarray,
         title: str = "",
-        colormap: str = "viridis",
+        colormap: str = "inferno",
         colorbar: bool = False,
     ):
         plt.imshow(array, cmap=colormap)
