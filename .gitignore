@@ -153,5 +153,5 @@ dmypy.json
 cython_debug/
 
 # Large Files
-*.stl
+.stl
 
