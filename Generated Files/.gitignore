@@ -1,2 +1,2 @@
-!spec/*.npy
-!spec/*.png
+*.npy
+*.png
