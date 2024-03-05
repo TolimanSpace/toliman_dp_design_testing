@@ -1,10 +1,11 @@
 import numpy as np
+from pathlib import Path
 import math
 import dLux as dl
 import dLux.utils as dlu
 import dLuxToliman as dlT
-import OpticsSupport
-import PlottingSupport
+import OpticsSupport as OpticsSupport
+import PlottingSupport as PlottingSupport
 import matplotlib.pyplot as plt
 
 # Aperture parameters
@@ -23,8 +24,8 @@ n1 = 1  # Refractive index of free space
 n2 = 1.5424  # Refractive index of Zerodur
 
 # Mask
-mask_path_1 = "modified_mask_lower.npy"
-mask_path_2 = "modified_mask_upper.npy"
+mask_path_1 = Path("Generated Files/Engineering/modified_mask_lower.npy").absolute()
+mask_path_2 = Path("Generated Files/Engineering/modified_mask_upper.npy").absolute()
 phase_mask_1 = np.load(mask_path_1)  # Load the mask and convert to phase
 phase_mask_2 = np.load(mask_path_2)
 phase_mask = phase_mask_1 + np.where(phase_mask_2 > 0,
@@ -34,11 +35,11 @@ phase_mask = phase_mask_1 + np.where(phase_mask_2 > 0,
 det_npixels = 3600  # DO NOT TOUCH
 pixel_scale = dlu.arcsec2rad(0.375) * ratio  # 0.375 arcsec per pixel
 max_reach = 0.691443  # Max wavelength to diffract to 80% of the diagonal
-# length of the detector
 
 wf_npixels = aperture_npix  # Number of pixels across the wavefront
 peak_wavelength = np.mean(wavelengths)  # Peak wavelength of the bandpass (m)
 
+# Creating the dLux objects
 mask = dl.Optic(phase=phase_mask)
 optics = dlT.TolimanOpticalSystem(
     wf_npixels=wf_npixels,
@@ -51,12 +52,13 @@ instrument = OpticsSupport.HelperFunctions.createTolimanTelescope(
     optics, source, ratio
 )
 
+# Check the phase mask
 print(optics)
-
 PlottingSupport.Plotting.printColormap(
     phase_mask, title="Phase Mask", colorbar=True, colormap="viridis"
 )
 
+# Simulate the PSF
 psf = instrument.model()
 
 r = psf.shape[0]
