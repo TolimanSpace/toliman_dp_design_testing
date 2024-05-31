@@ -9,9 +9,11 @@ class Plotting:
         title: str = "",
         colormap: str = "inferno",
         colorbar: bool = False,
+        colorbar_label: str = "",
     ):
-        plt.imshow(array, cmap=colormap)
+        image = plt.imshow(array, cmap=colormap)
         if colorbar:
-            plt.colorbar()
+            clbr = plt.colorbar(image)
+            clbr.set_label(colorbar_label)
         plt.title(title)
         plt.show()
