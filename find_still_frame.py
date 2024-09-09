@@ -5,7 +5,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-fname =  "/Volumes/Morgana2/gpir9156/toliman/glued/15_08_red_149us_19.5gain_img_stack_batch_0.npy"
+fname =      "/Volumes/Morgana2/gpir9156/toliman/non_glued/5_09_starphire1_red_90deg_200us_0gain_img_stack_batch_0.npy"
 data = np.load(fname)
 max_px_idx = np.unravel_index(np.argmax(data[0,:], axis=None), data[0,:].shape) # follow the brightest pixel
 
