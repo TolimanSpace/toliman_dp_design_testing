@@ -3,6 +3,10 @@
     the incoming WF sees it ?
 
     Is the detector image oriented the way the incoming WF sees it ?
+
+    NOTE: yes, detector image is oriented the way thze incoming WF sees it.
+
+    so simple flip about y-axis for data when comparing with real data from a detector
 """
 
 import dLux as dl
