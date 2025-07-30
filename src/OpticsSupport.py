@@ -1,6 +1,7 @@
 import jax.numpy as np
 import dLux.utils as dlu
 import dLuxToliman as dlT
+import matplotlib.pyplot as plt
 
 
 class HelperFunctions:
@@ -56,6 +57,11 @@ class HelperFunctions:
             amplitude * np.cos(B * Y + np.pi)
             + amplitude * np.cos(B * X + np.pi)
         ) / 4
+
+        # grating = (amplitude * np.cos(B * X))/4
+        # anti_grating = (
+        #     amplitude * np.cos(B * X + np.pi)
+        # ) / 4
 
         # Note here we divide the output by 4:
         # amplitude is a peak to trough value so we must halve the output once
@@ -152,7 +158,7 @@ class HelperFunctions:
         )
         period = wavelengths.max() / np.sin(diffraction_angle)
         grating_sampling = period / (aperture_diameter / aperture_npix)
-        print(f"Grating amplitude: {grating_sampling}")
+        # print(f"Grating amplitude: {grating_sampling}")
         print(f"Nyquist Ratio: {grating_sampling/2}")
         return period
 
@@ -177,9 +183,12 @@ class HelperFunctions:
         """
         Gmask = grating.at[np.where(mask == 0)].set(0.0)
         AGmask = anti_grating.at[np.where(mask != 0)].set(0.0)
+        # AGmask = grating.at[np.where(mask != 0)].set(0.0)
         full_grating = Gmask + AGmask
+        np.save("full_grating.npy", full_grating)
         full_grating -= full_grating.min()
         full_mask = mask + full_grating
+
         return full_mask
 
     @staticmethod
@@ -295,12 +304,23 @@ class HelperFunctions:
             aperture_diameter,
             aperture_npix,
         )
+        amplitude_rads = (2* amplitude * (n2-n1))/ wavelengths.mean()
+        print(f"Grating amplitude (nm): {amplitude*1e9}nm")
+        print(f"Grating amplitude (rads): {amplitude_rads}$\pi$ rads")
         print(f"Grating period: {period}m")
 
         # Create Grating
         grating, anti_grating, X, Y = HelperFunctions.generate_sinusoids(
             aperture_diameter, aperture_npix, period, amplitude
         )
+
+        # np.save("grating.npy", grating)
+        # np.save("anti_grating.npy", anti_grating)
+
+        # plt.imshow(grating, cmap="cividis")
+        # plt.colorbar()
+        # plt.savefig("grating.pdf", dpi=1000)
+        # plt.show()
 
         # Impose grating
         mask = HelperFunctions.impose_grating(mask, grating, anti_grating)
@@ -349,9 +369,9 @@ class HelperFunctions:
         instrument = instrument.set(
             "psf_pixel_scale", instrument.psf_pixel_scale * ratio
         )
-        instrument = instrument.set(
-            "source.separation", instrument.source.separation * ratio
-        )
+        # instrument = instrument.set(
+        #     "source.separation", instrument.source.separation * ratio
+        # )
 
         return instrument
 

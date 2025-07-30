@@ -17,3 +17,18 @@ class Plotting:
             clbr.set_label(colorbar_label)
         plt.title(title)
         plt.show()
+
+    @staticmethod
+    def saveColormap(
+        array: np.ndarray,
+        title: str = "",
+        colormap: str = "magma",
+        colorbar: bool = False,
+        colorbar_label: str = "",
+    ):
+        image = plt.imshow(array, cmap=colormap)
+        if colorbar:
+            clbr = plt.colorbar(image)
+            clbr.set_label(colorbar_label)
+        #plt.title(title)
+        plt.imsave(f"{title}.pdf", array)
