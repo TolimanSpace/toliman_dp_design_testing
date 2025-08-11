@@ -9,6 +9,8 @@ import zodiax as zdx
 import jax.numpy as jnp
 import numpy as np
 
+from tqdm.notebook import tqdm
+
 # version of jax.scipy.stats.logppmf where k can be non-discrete (helpful if data is not discrete photon counts)
 from jax.scipy.special import xlogy, gammaln
 import jax.scipy as jsp
@@ -65,6 +67,8 @@ class OptimManager():
     optimisers: list
     jointly_fit_params: list
 
+    param_update_dict: dict
+
     loss_fn: callable
 
     def __init__(
@@ -92,6 +96,8 @@ class OptimManager():
             Options are 'poisson', 'diff2' and 'norm'.
         optimisers : list
             List of optax optimisers to be used for optimisation. 
+            Here learning rates and schedules can be specified. 
+            One optimiser per parameter. 
         jointly_fit_params : list, default: []
             List of parameters to be jointly fitted across all models. 
             Gradients are updated by averaging across the graidents 
@@ -101,8 +107,15 @@ class OptimManager():
         """
         models = list(models)
         data = list(data)
+        optimisers = list(optimisers)
+        jointly_fit_params = list(jointly_fit_params)
         assert len(models) == len(data), "Must have same number of models as frames of data. \
             Got {} models and {} frames of data.".format(len(models), len(data))
+        assert len(models) == len(optimisers), "Must have same number of models as optimisers."
+        assert len(params) > 0, "Must have at least one parameter to optimise."
+        if len(jointly_fit_params) > 0:
+            assert set(jointly_fit_params).issubset(set(params)), \
+                "Jointly fit parameters must be a subset of the parameters to optimise."
 
         self.models = models
         self.data = data
@@ -110,6 +123,19 @@ class OptimManager():
         self.jointly_fit_params = jointly_fit_params
         self.optimisers = optimisers
         self.loss_fn = self.get_loss_fn(loss_fn)
+
+        self.param_update_dict = dict.fromkeys(params)
+        for key in self.param_update_dict:
+            self.param_update_dict[key] = []
+        self.param_update_dict["net loss"] = []
+
+    @property
+    def get_models(self):
+        """
+            Returns the list of models being optimised in their current state.
+            Models are BaseOpticalSystem's or Instruments.
+        """
+        return self.models
 
     def loss_and_grads(self):
         """
@@ -152,8 +178,42 @@ class OptimManager():
         return updated_models
 
     def run_optimisation(self, num_steps: int = 1000):
-        pass
+        """
+            Runs the optimisation loop for the specified number of steps.
+
+            Parameters:
+            ----------
+            num_steps : int, default: 1000
+                The number of optimisation steps to run.
+        """
+        optim, opt_state = zdx.get_optimiser(self.models[0], self.params, self.optimisers)
+        progress_bar = tqdm(range(num_steps), desc='Loss: ')
+        for j in progress_bar:
+            # Calculate loss and gradients
+            net_loss, grads = self.loss_and_grads()
+
+            # Update models
+            self.models = self.update_models(grads, optim, opt_state)
+
+            # store parameters of interest
+            self.store_params(net_loss);
     
+            progress_bar.set_description(f'Loss: {net_loss:.4f}')
+
+    def store_params(self, net_loss):
+        """
+            Store optimised parameters and their updates in a dictionary.
+            Parameters:
+            ----------
+            net_loss : float
+                The total loss across all models, to be stored in the dictionary.
+        """
+        for key in self.param_update_dict:
+            self.param_update_dict[key].append([model.get(key) for model in self.models])
+        self.param_update_dict["net loss"].append(net_loss)
+
+        return self.param_update_dict
+
     def get_loss_fn(self, str_name: str):
         """
             Returns a loss function which is decorated with zodiax's filter_jit and filter_value_and_grad
@@ -191,6 +251,7 @@ class OptimManager():
 # class JointOptimManager():
 """
  Different OptimManager classes can speak to each other 
+ Useful for jointly fitting across models of different configurations.
 """
 
 class PointSource(dl.sources.Source):
