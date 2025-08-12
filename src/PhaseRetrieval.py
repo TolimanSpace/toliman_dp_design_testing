@@ -11,6 +11,8 @@ import numpy as np
 
 from tqdm.notebook import tqdm
 
+import pickle
+
 # version of jax.scipy.stats.logppmf where k can be non-discrete (helpful if data is not discrete photon counts)
 from jax.scipy.special import xlogy, gammaln
 import jax.scipy as jsp
@@ -111,10 +113,10 @@ class OptimManager():
         jointly_fit_params = list(jointly_fit_params)
         assert len(models) == len(data), "Must have same number of models as frames of data. \
             Got {} models and {} frames of data.".format(len(models), len(data))
-        assert len(models) == len(optimisers), "Must have same number of models as optimisers."
         assert len(params) > 0, "Must have at least one parameter to optimise."
+        assert len(params) == len(optimisers), "Must have same number of optimisers as params."
         if len(jointly_fit_params) > 0:
-            assert set(jointly_fit_params).issubset(set(params)), \
+            assert set(list(jointly_fit_params)).issubset(set(list(params))), \
                 "Jointly fit parameters must be a subset of the parameters to optimise."
 
         self.models = models
@@ -150,7 +152,8 @@ class OptimManager():
                 List of gradients for each model. Gradients take same type as model
         """
         loss_grads = [self.loss_fn(model = self.models[k], data = self.data[k]) for k in range(len(self.models))]
-        net_loss = np.sum([loss_grads[k][0] for k in range(len(self.models))])
+        individual_loss = jnp.asarray([loss_grads[k][0] for k in range(len(self.models))])
+        net_loss = jnp.sum(individual_loss)
         grads = [loss_grads[k][1] for k in range(len(self.models))]
 
         for joint_param_str in self.jointly_fit_params:
@@ -159,7 +162,7 @@ class OptimManager():
 
             grads = [g.set(joint_param_str,joint_grad) for g in grads]
 
-        return net_loss, grads
+        return individual_loss, net_loss, grads
 
     def update_models(self, grads, optim, opt_state):
         """
@@ -175,6 +178,8 @@ class OptimManager():
                 The state of the optimiser, used to update the models.
         """
         updated_models = [zdx.apply_updates(self.models[k], optim.update(grads[k], opt_state)[0]) for k in range(len(self.models))]
+        self.models = updated_models
+
         return updated_models
 
     def run_optimisation(self, num_steps: int = 1000):
@@ -190,17 +195,17 @@ class OptimManager():
         progress_bar = tqdm(range(num_steps), desc='Loss: ')
         for j in progress_bar:
             # Calculate loss and gradients
-            net_loss, grads = self.loss_and_grads()
+            _, net_loss, grads = self.loss_and_grads()
 
             # Update models
-            self.models = self.update_models(grads, optim, opt_state)
+            self.update_models(grads, optim, opt_state);
 
             # store parameters of interest
             self.store_params(net_loss);
     
             progress_bar.set_description(f'Loss: {net_loss:.4f}')
 
-    def store_params(self, net_loss):
+    def store_params(self, net_loss, individual_loss):
         """
             Store optimised parameters and their updates in a dictionary.
             Parameters:
@@ -208,11 +213,25 @@ class OptimManager():
             net_loss : float
                 The total loss across all models, to be stored in the dictionary.
         """
-        for key in self.param_update_dict:
-            self.param_update_dict[key].append([model.get(key) for model in self.models])
+        for key in self.params:
+                self.param_update_dict[key].append([model.get(key) for model in self.models])
         self.param_update_dict["net loss"].append(net_loss)
+        self.param_update_dict["final losses"] = individual_loss # will keep updating and save the last update
 
         return self.param_update_dict
+    
+    def save_stored_params(self, filename: str):
+        """
+            Saves the stored parameters to a file.
+            Parameters:
+            ----------
+            filename : str
+                The name of the file to save the parameters to.
+        """
+        
+        with open(filename, 'wb') as f:
+            pickle.dump(self.param_update_dict, f)
+        print(f"Stored parameters saved to {filename}")
 
     def get_loss_fn(self, str_name: str):
         """
@@ -282,7 +301,7 @@ class JointOptimManager():
         assert set(jointly_fit_params).issubset(set(optim_managers[0].params)), \
             "Jointly fit parameters must be a subset of the parameters to optimise."
         
-        self.param_update_dict = []
+        self.param_update_dict = [None]*len(self.OptimManagers)
 
     def loss_and_grads(self):
         """
@@ -297,16 +316,18 @@ class JointOptimManager():
                 List of gradients for each model. Gradients take same type as model
         """
         loss_grads = [optim_manager.loss_and_grads() for optim_manager in self.OptimManagers]
-        net_loss = np.sum([loss_grads[k][0] for k in range(len(self.OptimManagers))])
-        grads = [loss_grads[k][1] for k in range(len(self.OptimManagers))]
+        indiviudal_losses = jnp.asarray([loss_grads[k][0] for k in range(len(self.OptimManagers))])
+        net_loss = np.sum([loss_grads[k][1] for k in range(len(self.OptimManagers))])
+        grads = [loss_grads[k][2] for k in range(len(self.OptimManagers))]
 
         for joint_param_str in self.jointly_fit_params:
             all_grads = [g.get(joint_param_str) for config_grads in grads for g in config_grads]
             joint_grad = jnp.asarray(all_grads).mean(axis=0)
 
-            grads = [g.set(joint_param_str,joint_grad) for config_grads in grads for g in config_grads]
+            for k in range(len(self.OptimManagers)):
+                grads[k] = [g.set(joint_param_str,joint_grad) for g in grads[k]]
 
-        return net_loss, grads
+        return indiviudal_losses, net_loss, grads
 
     def update_models(self, grads, optim, opt_state):
         """
@@ -339,17 +360,17 @@ class JointOptimManager():
         progress_bar = tqdm(range(num_steps), desc='Loss: ')
         for j in progress_bar:
             # Calculate loss and gradients
-            net_loss, grads = self.loss_and_grads()
+            individual_losses, net_loss, grads = self.loss_and_grads()
 
             # Update models
             self.models = self.update_models(grads, optim, opt_state)
 
             # store parameters of interest
-            self.store_params(net_loss);
+            self.store_params(net_loss, individual_losses);
     
             progress_bar.set_description(f'Loss: {net_loss:.4f}')
 
-    def store_params(self, net_loss):
+    def store_params(self, net_loss, individual_loss):
         """
             Store optimised parameters and their updates in a dictionary.
             Parameters:
@@ -358,10 +379,22 @@ class JointOptimManager():
                 The total loss across all models, to be stored in the dictionary.
         """
         for i, optim_manager in enumerate(self.OptimManagers):
-            optim_manager.store_params(net_loss)
+            optim_manager.store_params(net_loss, individual_loss[i])
             self.param_update_dict[i] = optim_manager.param_update_dict
 
         return self.param_update_dict
+    
+    def save_stored_params(self, filenames: list[str]):
+        """
+            Saves the stored parameters to a file.
+            Parameters:
+            ----------
+            filename : list[str]
+                A name per OptimManager to save the parameters to.
+        """
+        assert len(filenames) == len(self.OptimManagers), "Need a filename for each OptimManager to save the parameters to."
+        for i, filename in enumerate(filenames):
+            self.OptimManagers[i].save_stored_params(filename)
 
 class PointSource(dl.sources.Source):
     """
