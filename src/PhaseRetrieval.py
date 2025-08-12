@@ -248,11 +248,120 @@ class OptimManager():
 
         return loss_fn
 
-# class JointOptimManager():
-"""
- Different OptimManager classes can speak to each other 
- Useful for jointly fitting across models of different configurations.
-"""
+class JointOptimManager():
+    """
+        JointOptimManager has-a list of OptimManager's.
+        Useful for jointly fitting across models of different configurations.
+    """
+
+    OptimManagers: list[OptimManager]
+    jointly_fit_params: list
+
+    param_update_dict:list[dict]
+
+    def __init__(self, 
+                 optim_managers: list,
+                 jointly_fit_params: list,
+                 ):
+        """
+        Parameters
+        ----------
+        optim_managers : list
+            List of OptimManager's to be used for optimisation.
+            Each OptimManager will be optimised co-dependently 
+            with respect to the jointly_fit_params.
+        jointly_fit_params : list
+            List of parameters to be jointly fitted across all OptimManager's.
+            Gradients are updated by averaging across the graidents 
+            of each OptimManager.
+        """
+        
+        self.OptimManagers = list(optim_managers)
+        self.jointly_fit_params = list(jointly_fit_params)
+
+        assert set(jointly_fit_params).issubset(set(optim_managers[0].params)), \
+            "Jointly fit parameters must be a subset of the parameters to optimise."
+        
+        self.param_update_dict = []
+
+    def loss_and_grads(self):
+        """
+            Returns the net loss and individual model gradients as described by the loss_fn.
+            Gradients of jointly fit parameters will be averaged across all models to 
+            produce a single set of gradients for those parameters.
+            Returns:
+            --------
+            net_loss : float
+                The total loss across all models.
+            grads : list
+                List of gradients for each model. Gradients take same type as model
+        """
+        loss_grads = [optim_manager.loss_and_grads() for optim_manager in self.OptimManagers]
+        net_loss = np.sum([loss_grads[k][0] for k in range(len(self.OptimManagers))])
+        grads = [loss_grads[k][1] for k in range(len(self.OptimManagers))]
+
+        for joint_param_str in self.jointly_fit_params:
+            all_grads = [g.get(joint_param_str) for config_grads in grads for g in config_grads]
+            joint_grad = jnp.asarray(all_grads).mean(axis=0)
+
+            grads = [g.set(joint_param_str,joint_grad) for config_grads in grads for g in config_grads]
+
+        return net_loss, grads
+
+    def update_models(self, grads, optim, opt_state):
+        """
+            Updates the models using the gradients and optimiser state.
+
+            Parameters:
+            ----------
+            grads : list
+                List of gradients for each OptimManager model. Gradients take same type as model.
+            optim : optax.GradientTransformation
+                The optimiser to be used for updating the models. Assumes that all models in the OptimManagers
+                use the same optimiser.
+            opt_state : optax.OptState
+                The state of the optimiser, used to update the models.
+        """
+        updated_models = [optim_manager.update_models(grads=grads[i], optim=optim, opt_state=opt_state) for i, optim_manager in enumerate(self.OptimManagers)]
+
+        return updated_models
+
+    def run_optimisation(self, num_steps: int = 1000):
+        """
+            Runs the optimisation loop for the specified number of steps.
+
+            Parameters:
+            ----------
+            num_steps : int, default: 1000
+                The number of optimisation steps to run.
+        """
+        optim, opt_state = zdx.get_optimiser(self.OptimManagers[0].models[0], self.OptimManagers[0].params, self.OptimManagers[0].optimisers)
+        progress_bar = tqdm(range(num_steps), desc='Loss: ')
+        for j in progress_bar:
+            # Calculate loss and gradients
+            net_loss, grads = self.loss_and_grads()
+
+            # Update models
+            self.models = self.update_models(grads, optim, opt_state)
+
+            # store parameters of interest
+            self.store_params(net_loss);
+    
+            progress_bar.set_description(f'Loss: {net_loss:.4f}')
+
+    def store_params(self, net_loss):
+        """
+            Store optimised parameters and their updates in a dictionary.
+            Parameters:
+            ----------
+            net_loss : float
+                The total loss across all models, to be stored in the dictionary.
+        """
+        for i, optim_manager in enumerate(self.OptimManagers):
+            optim_manager.store_params(net_loss)
+            self.param_update_dict[i] = optim_manager.param_update_dict
+
+        return self.param_update_dict
 
 class PointSource(dl.sources.Source):
     """
