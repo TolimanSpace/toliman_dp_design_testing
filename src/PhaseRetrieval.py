@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from tqdm.notebook import tqdm
+import matplotlib.pyplot as plt
 
 import pickle
 
@@ -233,6 +234,26 @@ class OptimManager():
             pickle.dump(self.param_update_dict, f)
         print(f"Stored parameters saved to {filename}")
 
+    def calc_CRLB(self, param: str):
+        """
+            Calculates the Cramer-Rao Lower Bound (CRLB) for the given parameters.
+            This is calculated for each model.
+
+            Returns:
+            --------
+            crlb: Array
+                Shape (n_models, n_params)
+        """
+        assert param in self.params, "Parameter {} not in params {}".format(param, self.params)
+
+        CRLB = [jnp.linalg.pinv(zdx.fisher_matrix(self.models[k],
+                            param,
+                            self.loss_fn, 
+                            self.data[k])[0]).diagonal()**0.5 
+                            for k in range(len(self.models))]
+        
+        return jnp.asarray(CRLB)    
+
     def get_loss_fn(self, str_name: str):
         """
             Returns a loss function which is decorated with zodiax's filter_jit and filter_value_and_grad
@@ -395,6 +416,20 @@ class JointOptimManager():
         assert len(filenames) == len(self.OptimManagers), "Need a filename for each OptimManager to save the parameters to."
         for i, filename in enumerate(filenames):
             self.OptimManagers[i].save_stored_params(filename)
+
+    def calc_CRLB(self, param: str):
+        """
+            Calculates the Cramer-Rao Lower Bound (CRLB) for a given parameter.
+            This is calculated for each OptimManager.
+
+            Returns:
+            --------
+            crlb: list
+                List of CRLB arrays called from OptimManager.calc_CRLB 
+        """
+        CRLB = [optim_manager.calc_CRLB(param) for optim_manager in self.OptimManagers]
+        
+        return CRLB
 
 class PointSource(dl.sources.Source):
     """
