@@ -196,13 +196,13 @@ class OptimManager():
         progress_bar = tqdm(range(num_steps), desc='Loss: ')
         for j in progress_bar:
             # Calculate loss and gradients
-            _, net_loss, grads = self.loss_and_grads()
+            individual_losses, net_loss, grads = self.loss_and_grads()
 
             # Update models
             self.update_models(grads, optim, opt_state);
 
             # store parameters of interest
-            self.store_params(net_loss);
+            self.store_params(net_loss,individual_losses);
     
             progress_bar.set_description(f'Loss: {net_loss:.4f}')
 
