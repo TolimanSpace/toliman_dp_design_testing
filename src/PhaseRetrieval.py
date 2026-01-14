@@ -18,8 +18,11 @@ import pickle
 from jax.scipy.special import xlogy, gammaln
 import jax.scipy as jsp
 from jax._src.lax.lax import _const as _lax_const
-from jax import lax
+from jax import lax, Array
 from jax._src.numpy.util import promote_args_inexact
+from jax.tree_util import tree_map, tree_flatten
+
+from src.uv import compute_complex_vis
 
 def jax_0_4_24_logpmf(k: jnp.array, mu: jnp.array, loc: jnp.array = 0) -> jnp.array:
     r"""Poisson log probability mass function.
@@ -73,6 +76,7 @@ class OptimManager():
     param_update_dict: dict
 
     loss_fn: callable
+    loss_fn_kwargs: dict
 
     def __init__(
             self,
@@ -82,6 +86,7 @@ class OptimManager():
             loss_fn: str,
             optimisers: list,
             jointly_fit_params: list = [],
+            loss_fn_kwargs: dict = {}
             ):
         """
         Parameters
@@ -106,6 +111,8 @@ class OptimManager():
             Gradients are updated by averaging across the graidents 
             of each model.
             If none given, all parameters are optimised individually.
+        loss_fn_kwargs : dict, default: {}
+            Additional keyword arguments to be passed to the loss function.
 
         """
         models = list(models)
@@ -125,6 +132,7 @@ class OptimManager():
         self.params = params
         self.jointly_fit_params = jointly_fit_params
         self.optimisers = optimisers
+        self.loss_fn_kwargs = loss_fn_kwargs
         self.loss_fn = self.get_loss_fn(loss_fn)
 
         self.param_update_dict = dict.fromkeys(params)
@@ -282,6 +290,21 @@ class OptimManager():
                 # loss = -jsp.stats.norm.logpdf(x=data, loc=simu_psf, scale=stdev).sum()
                 loss = -jsp.stats.norm.logpdf(x=simu_psf, loc=data, scale=stdev).sum()
                 return loss
+        elif str_name=='ph_diff2':
+            model_mask = self.loss_fn_kwargs.get('model_mask')
+            data_mask = self.loss_fn_kwargs.get('data_mask')
+            if model_mask is None or data_mask is None:
+                raise ValueError("For 'ph_diff2' loss function, 'model_mask' and 'data_mask' must be provided in loss_fn_kwargs.")
+            @zdx.filter_jit
+            @zdx.filter_value_and_grad(self.params)
+            def loss_fn(model, data):
+                simu_psf = model.model()
+                _, _, simu_ph = compute_complex_vis(simu_psf)
+                _, _, data_ph = compute_complex_vis(data)
+
+                loss = (((data_ph*data_mask)-(simu_ph*model_mask))**2).sum()
+                return loss
+
         else: 
             Warning("No valid loss function given." \
             "available are 'poisson', 'diff2' and 'norm' ")
@@ -364,7 +387,7 @@ class JointOptimManager():
             opt_state : optax.OptState
                 The state of the optimiser, used to update the models.
         """
-        updated_models = [optim_manager.update_models(grads=grads[i], optim=optim, opt_state=opt_state) for i, optim_manager in enumerate(self.OptimManagers)]
+        updated_models = [optim_manager.update_models(grads=grads[i], optim=optim[i], opt_state=opt_state[i]) for i, optim_manager in enumerate(self.OptimManagers)]
 
         return updated_models
 
@@ -377,14 +400,15 @@ class JointOptimManager():
             num_steps : int, default: 1000
                 The number of optimisation steps to run.
         """
-        optim, opt_state = zdx.get_optimiser(self.OptimManagers[0].models[0], self.OptimManagers[0].params, self.OptimManagers[0].optimisers)
+        optims = [zdx.get_optimiser(self.OptimManagers[k].models[0], self.OptimManagers[k].params, self.OptimManagers[k].optimisers)[0] for k in range(len(self.OptimManagers))]
+        opt_states = [zdx.get_optimiser(self.OptimManagers[k].models[0], self.OptimManagers[k].params, self.OptimManagers[k].optimisers)[1] for k in range(len(self.OptimManagers))]
         progress_bar = tqdm(range(num_steps), desc='Loss: ')
         for j in progress_bar:
             # Calculate loss and gradients
             individual_losses, net_loss, grads = self.loss_and_grads()
 
             # Update models
-            self.models = self.update_models(grads, optim, opt_state)
+            self.models = self.update_models(grads, optims, opt_states)
 
             # store parameters of interest
             self.store_params(net_loss, individual_losses);
@@ -580,4 +604,294 @@ class TransmissiveLayer(dl.layers.TransmissiveLayer):
         wavefront *= dlu.rotate(self.transmission, self.rotation) 
         if self.normalise:
             wavefront = wavefront.normalise()
+        return wavefront
+
+# Global useful functions
+def rotation_matrix(theta: float):
+    """
+        Parameters:
+        ----------
+        theta: float
+            Angle of rotation in radians
+        Returns:
+        --------
+        jnp.array:
+            2D rotation matrix (CCW) for given angle
+    """
+    return jnp.array([[jnp.cos(theta), jnp.sin(theta)], [-jnp.sin(theta), jnp.cos(theta)]])
+
+
+class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
+
+    """
+        Inherits from dLux BaseDynamicAperture, with almost identical functionality
+        to CompositeAperture with... (personal prefs, _pattern_rot, _rmaxes update etc)
+
+        Attributes
+        ----------
+        transmission: Array
+            The Array of transmission values to be applied to the input wavefront.
+        normalise: bool
+            Whether to normalise the wavefront after passing through the optic.
+        _pattern_rot: float
+            Rotation of aperture pattern in radians. Initially set to 0.
+        apertures: dict
+            Dictionary of either dLux CircularAperture or dLux AberratedAperture objects representing 
+            the circular sub-apertures. 
+            Each segment is defined by the center and rmax.
+        _pixel_coords: jnp.array
+            2D coordinates for each pixel center describing the aperture (m).
+        _prim_diam: float
+            Primary diameter of Jewel mask in meters
+        _npix: int
+            Number of pixels spanning vertically/horizontally over the primary mask diameter
+    """
+    n_sides = 0                     # circ
+    rot = 0                         # Default rotation of segments - redudant for circular ap but leaving it here 
+                                    # for completeness 
+    
+    sub_apertures: dict
+    _pattern_rot: jnp.array
+    _ap_centers: jnp.array
+    _ap_noll_idxs: jnp.array
+
+
+    _pixel_coords: jnp.array
+    _prim_diam: float
+    _npix: int
+    _rmax: jnp.array
+    # _rmax_param: str = "rmax" # parameter path to update in sub_apertures
+    _rmax_param: str = "radius" # parameter path to update in sub_apertures
+
+
+
+    def __init__(self: dl.layers.apertures.BaseDynamicAperture, 
+                subap_centers: list, 
+                rmax: jnp.array,
+                pixel_coords: jnp.array,
+                npix: int,
+                prim_diam: float,   
+                normalise: bool = False,
+                pattern_rot: jnp.array = jnp.array([0.0]),
+                ap_noll_idxs: jnp.array = None,
+                ):
+        """
+        Parameters:
+        ----------
+            subap_centers: list
+                List describing the cartesian [x,y] coordinates of __every__ segments'
+                center in every tiling pattern in the entire mask. Element i contains an array
+                of size (n_seg, 2) where n_seg = the # of segments in each tiling pattern
+                on the Jewel mask. Units in meters.
+                # NOTE I copied this class over from Jewel repo so if things are formatted 
+                weird that's why.
+            rmax: float
+                Max radius to vertices from center of hexagonal segment, meters. If single value
+                is given, same rmax applied to all segements. Else, must be of shape (n,) where
+                n is the length of hex_centers.
+            pixel_coords: jnp.array
+                2D coordinates for each pixel center in JewelWedge (cartesian or polar)
+            n_pix: int
+                Number of pixels spanning vertically/horizontally over the primary mask diameter
+            prim_diam: float
+                Primary diameter of Jewel mask in meters
+            normalise: bool
+                Whether to normalise the wavefront after passing through the optic.
+            pattern_rot: Array
+                Rotation of shim pattern in radians. Default 0.0
+            ap_noll_idxs: jnp.array = None
+                1D array containing the Zernike (Noll) indices to be used to descibe the aberrations
+                across each segment. If None, _sub_apertures will be a dictonary of CircularAperture objects,
+                otherwise AberratedAperture objects will be used.
+        """
+        
+        assert subap_centers[0].shape[-1] == 2, """Hexagonal centers dimensions are incorrect. Expecting list of length n_patterns with each entry
+                                                an (n_segments,2) array. Got shape {}""".format(subap_centers[0].shape)
+        
+        list_centers = []
+        for pattern in subap_centers:
+            for coord in pattern:
+                list_centers.append(coord)
+        self._ap_centers = jnp.asarray(list_centers) # change to 2d array 
+
+        rmax = jnp.asarray([rmax], dtype=float)
+        if rmax.shape == (1,):
+            self._rmax = jnp.ones((self._ap_centers.shape[0],), dtype=float)*rmax
+        else:
+            assert rmax.shape == (self._ap_centers.shape[0],), "rmax must be single value or array of length equal to hex_centers"
+            self._rmax = jnp.asarray(rmax, dtype=float)
+
+        self._pixel_coords=pixel_coords
+        self._prim_diam=prim_diam
+        self._npix = npix
+        self._ap_noll_idxs = ap_noll_idxs
+        sub_aperture_list = self.init_sub_apertures()
+        self.sub_apertures = dlu.list2dictionary(sub_aperture_list, ordered=True) 
+
+        self._pattern_rot = jnp.asarray(pattern_rot)
+
+        super().__init__()
+
+    def __getattr__(self: dl.layers.apertures.ApertureLayer, key: str):
+        """
+        Raises the contained apertures via their dictionary keys.
+
+        Parameters
+        ----------
+        key: str
+            The attribute to get.
+
+        Returns
+        -------
+        attribute: Any
+            The aperture found at the given key.
+        """
+        sub_apertures = self.__dict__.get("sub_apertures", None)
+        if sub_apertures is not None and key in list(self.sub_apertures.keys()):
+            return self.sub_apertures[key]
+        else:
+            raise AttributeError(key)
+        
+    def init_sub_apertures(self): 
+        """
+            Parameters:
+            ----------
+            ap_noll_idxs: jnp.array
+                1D array containing the Zernike (Noll) indices to be used to descibe the basis
+                at each segment. If None, RegularPolygon objects will be used to describe the
+                hexagonal segments.
+            Returns:
+            --------
+            sub_apertures: list
+                List of dLux RegularPolygon or AberratedAperture objects representing the hexagonal segments
+                in the shim pattern. Each segment is defined by the center and rmax.
+        """
+        sub_apertures = [] #vmap this?
+        for i, cen_tf in enumerate(self._ap_centers):
+            # tf = dl.CoordTransform(translation=(cen_tf[0], cen_tf[1]), rotation=0.0) # rotation changes basis axes (not just envelope)
+            tf = dl.CoordTransform(translation=(cen_tf[0], cen_tf[1]), rotation=self.rot) # rotation changes basis axes (not just envelope)
+            
+            # sub_apertures.append(dl.RegPolyAperture(nsides=self.n_sides, rmax=self._rmax[i], transformation=tf)) # to extend for polygons
+            sub_apertures.append(dl.CircularAperture(radius=self._rmax[i], transformation=tf))
+
+
+        if self._ap_noll_idxs is not None:
+            # self._rmax_param = "aperture.rmax" # valid for RegPolyAperture not CircularAperture
+            self._rmax_param = "aperture.radius"
+            sub_apertures = [dl.AberratedAperture(aperture, self._ap_noll_idxs) for aperture in sub_apertures] 
+
+        return sub_apertures
+
+    def _aberrated_apertures(self: dl.layers.apertures.ApertureLayer) -> list[dl.layers.apertures.ApertureLayer]:
+        """
+        Returns the list of aberrated apertures, from the full set of apertures, along with their 
+        corresponding transmission arrays
+
+        Returns
+        -------
+        apertures : list
+            The list of aberrated apertures.
+        """
+
+        apertures = self.update_radii()
+
+        # to rotate basis (envelope only and NOT basis axis) we need to rotate the centers of the hexagons
+        rotated_centers = jnp.asarray([jnp.matmul(cen, rotation_matrix(self._pattern_rot)) for cen in  self._ap_centers])
+        rotated_centers = rotated_centers[:,:,0]
+        aberrated_aps = []
+        for i, aper in enumerate(apertures.keys()): 
+            tf = dl.CoordTransform(translation=(rotated_centers[i,0], rotated_centers[i,1]), rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
+            aberrated_aps.append(apertures[aper].set("aperture.transformation", tf)) 
+
+        # hex_trans = [aper.transmission(self._pixel_coords, self._prim_diam/self._npix) for aper in aberrated_aps] #TODO dlu.rotate
+        hex_trans = [dlu.rotate(apertures[aper].transmission(self._pixel_coords, self._prim_diam/self._npix), self._pattern_rot) for aper in apertures.keys()]
+        # aberrated_aps = [aper.set("aperture.nsides",0) for aper in aberrated_aps]  # circ basis (to cut from - hexikeys unideal)
+
+        # aberrated_aps = [apertures[aper].set("aperture.nsides",0) for aper in apertures.keys() if isinstance(apertures[aper], dl.layers.apertures.AberratedAperture)]
+        # hex_trans = [apertures[aper].transmission(self._pixel_coords, self._prim_diam/self._npix) for aper in apertures.keys() if isinstance(apertures[aper], dl.layers.apertures.AberratedAperture)]
+
+        return aberrated_aps, hex_trans
+
+    @property
+    def coefficients(self: dl.layers.apertures.ApertureLayer) -> list[Array]:
+        """
+        Returns the coefficients of the aberrated apertures.
+
+        Returns
+        -------
+        coefficients : list[Array]
+            The coefficients of the aberrated apertures.
+        """
+        apertures, _ = self._aberrated_apertures()
+        return [ap.coefficients for ap in apertures]
+
+
+    def eval_basis(self: dl.layers.apertures.ApertureLayer) -> Array:
+        """
+        Calculates the basis vectors at the given coordinates.
+
+        Parameters
+        ----------
+        coords : Array
+            The coordinates to calculate the basis vectors on.
+
+        Returns
+        -------
+        basis : Array
+            The basis vectors at the given coordinates.
+        """
+        aberrated_apertures, aperture_trans = self._aberrated_apertures()
+        basis_fn = lambda ap: ap.calc_basis(self._pixel_coords) #default to circ
+        basii = [basis_fn(aperture) for aperture in aberrated_apertures]
+        coeffs = self.coefficients
+        eval_fn = lambda basis, coeff: dlu.eval_basis(basis, coeff)
+        basis= jnp.array([eval_fn(basis, coeff)*trans for basis, coeff, trans in zip(basii, coeffs, aperture_trans)]).sum(axis=0)   
+
+        return basis #TODO basis envelope should rotate but not the basis itself
+
+
+    def transmission(self): # pragma: no cover
+        apertures = self.update_radii()
+
+        eval_fn = lambda ap: ap.transmission(self._pixel_coords, self._prim_diam/self._npix)
+        leaf_fn = lambda ap: isinstance(ap, dl.layers.apertures.ApertureLayer)
+        transmissions = tree_map(eval_fn, apertures, is_leaf=leaf_fn)
+        return dlu.rotate(np.squeeze(np.array(tree_flatten(transmissions)[0])).sum(axis=0), self._pattern_rot)
+
+    def update_radii(self):
+        """
+            Updates the radii of the apertures and returns new apertures dict.
+        """
+        # Update radii
+        # we don't do through each aperturees own function because can't optimise on floats (only arr of floats)
+        # and single vector to descibe all segements would be nice here.
+        return {key: self.sub_apertures[key].set(self._rmax_param, rmax) for key, rmax in zip(self.sub_apertures.keys(), self._rmax)}
+    
+
+    def apply(self: dl.layers.apertures.ApertureLayer, wavefront: dl.wavefronts.Wavefront) -> dl.wavefronts.Wavefront:
+        """
+        Applies the layer to the wavefront.
+
+        Parameters
+        ----------
+        wavefront : Wavefront
+            The wavefront to operate on.
+
+        Returns
+        -------
+        wavefront : Wavefront
+            The transformed wavefront.
+        """
+
+        # Transmission
+        wavefront *= self.transmission()
+
+        if self.normalise:
+            return wavefront.normalise()
+
+        if self._hex_noll_idxs is not None:
+            # Aberrations
+            aberrations = self.eval_basis() 
+            wavefront += aberrations #no option to apply as phase
+
         return wavefront
