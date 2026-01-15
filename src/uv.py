@@ -451,7 +451,22 @@ class UVComponents():
             inv_A = jnp.linalg.pinv(A) 
             inv_matrices.append(inv_A)
         return inv_matrices
-        
+
+    def get_inv_diff_pist_arr(self):
+        # NOTE: zero piston assumed on last sub-aperture
+        inv_matrices = []
+        for pat_i in range(len(self.mask_coords)):
+            A = jnp.zeros(shape=(self.n_bl[pat_i],self.n_holes[pat_i]))
+            for baseline_i in range(self.bl2h[pat_i].shape[1]):
+                hole_i, hole_j = self.bl2h[pat_i][0,baseline_i], self.bl2h[pat_i][1,baseline_i]
+                A = A.at[baseline_i,hole_i].set(1)
+                A = A.at[baseline_i,hole_j].set(-1)
+
+            A = A.at[:, -1].set(0) # zero piston on last sub-aperture
+            inv_A = jnp.linalg.pinv(A) 
+            inv_matrices.append(inv_A)
+        return inv_matrices
+
     def subdiv_mask_coords(self, sub_divide: dict):
         """
             Sub-divide the mask coordinates into circular sub-sub-apertures
@@ -764,6 +779,28 @@ class UVComponents():
             TT_ESTIMATES.append(jnp.vstack([tip_est_ph, tilt_est_ph]).T)
 
         return TT_ESTIMATES
+    
+    def reconstruct_pupil_ph(self, baseline_pist: list[jnp.array]):
+        """
+            Given baseline differential piston measurements, reconstruct
+            the pupil phase. Assumes ref aperture is the last in the given
+            mask coordinates.
+
+            Parameters:
+            ------------
+            baseline_pist: list[np.array]
+                List of 1D arrays, one for each pattern, each an array of size 
+                (n_splodges,) of measured differential piston values for each splodge.
+        """
+
+        pist_inv_arrs = self.get_inv_diff_pist_arr()
+        pupil_pists = []
+        for pat_i, pist_array in enumerate(baseline_pist):
+            pupil_pist = jnp.matmul(pist_inv_arrs[pat_i], pist_array).flatten()
+            pupil_pists.append(pupil_pist)
+
+        return pupil_pists
+
 
     @property
     def splodge_masks(self):

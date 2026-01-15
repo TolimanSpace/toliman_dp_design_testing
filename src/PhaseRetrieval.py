@@ -726,7 +726,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         self._npix = npix
         self._ap_noll_idxs = ap_noll_idxs
         sub_aperture_list = self.init_sub_apertures()
-        self.sub_apertures = dlu.list2dictionary(sub_aperture_list, ordered=True) 
+        self.sub_apertures = dlu.list2dictionary(sub_aperture_list, True, dl.layers.apertures.ApertureLayer) 
 
         self._pattern_rot = jnp.asarray(pattern_rot)
 
@@ -794,10 +794,8 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         """
 
         apertures = self.update_radii()
-
         # to rotate basis (envelope only and NOT basis axis) we need to rotate the centers of the hexagons
         rotated_centers = jnp.asarray([jnp.matmul(cen, rotation_matrix(self._pattern_rot)) for cen in  self._ap_centers])
-        rotated_centers = rotated_centers[:,:,0]
         aberrated_aps = []
         for i, aper in enumerate(apertures.keys()): 
             tf = dl.CoordTransform(translation=(rotated_centers[i,0], rotated_centers[i,1]), rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
