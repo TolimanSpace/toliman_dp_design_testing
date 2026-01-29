@@ -7,6 +7,7 @@ import dLux.utils as dlu
 import zodiax as zdx
 
 import jax.numpy as jnp
+from jax import Array
 import numpy as np
 
 from tqdm.notebook import tqdm
@@ -291,10 +292,10 @@ class OptimManager():
                 loss = -jsp.stats.norm.logpdf(x=simu_psf, loc=data, scale=stdev).sum()
                 return loss
         elif str_name=='ph_diff2':
-            model_mask = self.loss_fn_kwargs.get('model_mask')
-            data_mask = self.loss_fn_kwargs.get('data_mask')
-            if model_mask is None or data_mask is None:
-                raise ValueError("For 'ph_diff2' loss function, 'model_mask' and 'data_mask' must be provided in loss_fn_kwargs.")
+            # model_mask = self.loss_fn_kwargs.get('model_mask')
+            # data_mask = self.loss_fn_kwargs.get('data_mask')
+            # if model_mask is None or data_mask is None:
+            #     raise ValueError("For 'ph_diff2' loss function, 'model_mask' and 'data_mask' must be provided in loss_fn_kwargs.")
             @zdx.filter_jit
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
@@ -302,8 +303,11 @@ class OptimManager():
                 _, _, simu_ph = compute_complex_vis(simu_psf)
                 _, _, data_ph = compute_complex_vis(data)
 
-                loss = (((data_ph*data_mask)-(simu_ph*model_mask))**2).sum()
-                return loss
+                # loss = (((data_ph*data_mask)-(simu_ph*model_mask))**2).sum()
+                # loss = ((data_ph-simu_ph)**2).sum()
+                loss = ((jnp.nan_to_num(data_ph) - jnp.nan_to_num(simu_ph)) ** 2).sum()
+
+                return jnp.log(loss)
 
         else: 
             Warning("No valid loss function given." \
@@ -893,3 +897,121 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
             wavefront += aberrations #no option to apply as phase
 
         return wavefront
+    
+class ParametricOpticalSystem(dl.optical_systems.OpticalSystem):
+    """
+    Implements the attributes required for an optical system with a specific output
+    pixel scale and number of pixels.
+
+    NOTE - adding to overcome zodiax float incompatibility 
+
+    Attributes
+    ----------
+    psf_npixels : int
+        The number of pixels of the final PSF.
+    oversample : int
+        The oversampling factor of the final PSF. Decreases the psf_pixel_scale
+        parameter while increasing the psf_npixels parameter.
+    psf_pixel_scale : float
+        The pixel scale of the final PSF.
+    """
+
+    psf_npixels: int
+    oversample: int
+    psf_pixel_scale: jnp.array
+
+    def __init__(
+        self: dl.optical_systems.OpticalSystem,
+        psf_npixels: int,
+        psf_pixel_scale: float,
+        oversample: int = 1,
+        **kwargs,
+    ):
+        """
+        Parameters
+        ----------
+        psf_npixels : int
+            The number of pixels of the final PSF.
+        psf_pixel_scale : float
+            The pixel scale of the final PSF.
+        oversample : int = 1.
+            The oversampling factor of the final PSF. Decreases the psf_pixel_scale
+            parameter while increasing the psf_npixels parameter.
+        """
+        self.psf_npixels = int(psf_npixels)
+        self.oversample = int(oversample)
+        self.psf_pixel_scale = jnp.array(psf_pixel_scale, dtype=float)
+        super().__init__(**kwargs)
+
+class AngularOpticalSystem(ParametricOpticalSystem, dl.optical_systems.LayeredOpticalSystem):
+    """
+    Implements the attributes required for an optical system with a specific output
+    pixel scale and number of pixels.
+
+    NOTE - adding to overcome zodiax float incompatibility 
+
+    Attributes
+    ----------
+    psf_npixels : int
+        The number of pixels of the final PSF.
+    oversample : int
+        The oversampling factor of the final PSF. Decreases the psf_pixel_scale
+        parameter while increasing the psf_npixels parameter.
+    psf_pixel_scale : float
+        The pixel scale of the final PSF.
+    """
+
+    def __init__(
+        self: dl.optical_systems.OpticalSystem,
+        wf_npixels: int,
+        diameter: float,
+        layers: list,
+        psf_npixels: int,
+        psf_pixel_scale: float,
+        oversample: int = 1,
+    ):
+        super().__init__(
+            wf_npixels=wf_npixels,
+            diameter=diameter,
+            layers=layers,
+            psf_npixels=psf_npixels,
+            psf_pixel_scale=psf_pixel_scale,
+            oversample=oversample,
+        )
+
+    def propagate_mono(
+        self: dl.optical_systems.OpticalSystem,
+        wavelength: Array,
+        offset: Array = jnp.zeros(2),
+        return_wf: bool = False,
+    ) -> Array:
+        """
+        Propagates a monochromatic point source through the optical layers.
+
+        Parameters
+        ----------
+        wavelength : float, metres
+            The wavelength of the wavefront to propagate through the optical layers.
+        offset : Array, radians = np.zeros(2)
+            The (x, y) offset from the optical axis of the source.
+        return_wf: bool = False
+            Should the Wavefront object be returned instead of the psf Array?
+
+        Returns
+        -------
+        object : Array, Wavefront
+            if `return_wf` is False, returns the psf Array.
+            if `return_wf` is True, returns the Wavefront object.
+        """
+        wf = super().propagate_mono(wavelength, offset, return_wf=True)
+
+        # Propagate
+        true_pixel_scale = self.psf_pixel_scale / self.oversample
+        pixel_scale = dlu.arcsec2rad(true_pixel_scale)
+        psf_npixels = self.psf_npixels * self.oversample
+        wf = wf.propagate(psf_npixels, pixel_scale)
+
+        # Return PSF or Wavefront
+        if return_wf:
+            return wf
+        return wf.psf
