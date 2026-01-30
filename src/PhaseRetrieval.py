@@ -291,23 +291,18 @@ class OptimManager():
                 # loss = -jsp.stats.norm.logpdf(x=data, loc=simu_psf, scale=stdev).sum()
                 loss = -jsp.stats.norm.logpdf(x=simu_psf, loc=data, scale=stdev).sum()
                 return loss
-        elif str_name=='ph_diff2':
-            # model_mask = self.loss_fn_kwargs.get('model_mask')
-            # data_mask = self.loss_fn_kwargs.get('data_mask')
-            # if model_mask is None or data_mask is None:
-            #     raise ValueError("For 'ph_diff2' loss function, 'model_mask' and 'data_mask' must be provided in loss_fn_kwargs.")
+        elif str_name=='diff2_ph_reg':
+            pupil_phase = self.loss_fn_kwargs.get('pupil_phase')
             @zdx.filter_jit
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
+                opd_waves = model.aperture.eval_basis()/model.source.wavelengths[0]*model.sam18.transmission
                 simu_psf = model.model()
-                _, _, simu_ph = compute_complex_vis(simu_psf)
-                _, _, data_ph = compute_complex_vis(data)
 
-                # loss = (((data_ph*data_mask)-(simu_ph*model_mask))**2).sum()
-                # loss = ((data_ph-simu_ph)**2).sum()
-                loss = ((jnp.nan_to_num(data_ph) - jnp.nan_to_num(simu_ph)) ** 2).sum()
+                loss_i = ((data-simu_psf)**2).sum()
+                loss_ph = ((pupil_phase-opd_waves)**2).sum()
 
-                return jnp.log(loss)
+                return loss_i*loss_ph
 
         else: 
             Warning("No valid loss function given." \
