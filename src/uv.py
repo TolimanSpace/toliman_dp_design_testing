@@ -191,7 +191,7 @@ def mf(
     # Get u,v coords for each baseline
     u_real = jnp.asarray([(mask_coords[bl2h_ix[0, i], 0] - mask_coords[bl2h_ix[1, i], 0]) / center_wl for i in range(n_baselines)])
     v_real = jnp.asarray([(mask_coords[bl2h_ix[0, i], 1] - mask_coords[bl2h_ix[1, i], 1]) / center_wl for i in range(n_baselines)])
-    u_px = jnp.asarray(u_real*center_wl/pixel_sz + int(n_pix/2), dtype=int)
+    u_px = jnp.asarray(u_real*center_wl/pixel_sz + int(n_pix/2), dtype=int) # TODO
     v_px = jnp.asarray(v_real*center_wl/pixel_sz + int(n_pix/2), dtype=int)
 
     # BL length (m)
@@ -283,7 +283,7 @@ def SplodgeZernikeBasis(
 
     basii = []
     if splodge_radius is None:
-        wh = (2*uv_coords.max())/uv_coords.shape[1]*1/2 # single pixel width
+        # wh = (2*uv_coords.max())/uv_coords.shape[1]*1/2 # single pixel width
         for i, (u, v) in enumerate(splodge_coords):
             # round to nearest pixel 
             d_u,d_v = jnp.abs(uv_coords[0]-u), jnp.abs(uv_coords[1]-v)
