@@ -281,7 +281,7 @@ class OptimManager():
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
                 simu_psf = model.model()
-                loss = ((data-simu_psf)**2).sum()
+                loss = jnp.nansum((data - simu_psf) ** 2)
                 return loss
         elif str_name=='norm':
             @zdx.filter_jit
@@ -293,14 +293,15 @@ class OptimManager():
                 return loss
         elif str_name=='diff2_ph_reg':
             pupil_phase = self.loss_fn_kwargs.get('pupil_phase')
+            pupil_mask = self.loss_fn_kwargs.get('pupil_mask')
             @zdx.filter_jit
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
-                opd_waves = model.aperture.eval_basis()/model.source.wavelengths[0]*model.sam18.transmission
+                opd_waves = model.aperture.eval_basis()/model.source.wavelengths[0]*pupil_mask
                 simu_psf = model.model()
 
-                loss_i = ((data-simu_psf)**2).sum()
-                loss_ph = ((pupil_phase-opd_waves)**2).sum()
+                loss_i = jnp.nansum((data - simu_psf) ** 2)
+                loss_ph = jnp.nansum((pupil_phase - opd_waves) ** 2)
 
                 return loss_i*loss_ph
 
