@@ -504,12 +504,15 @@ class PointSource(dl.sources.Source):
 
     position: jnp.array
     flux: jnp.array
+    logflux: jnp.array
+    bool_logflux: bool = False
 
     def __init__(
         self: dl.sources.Source,
         wavelengths: jnp.array = None,
         position: jnp.array = jnp.zeros(2),
         flux: jnp.array = None,
+        logflux: jnp.array = None,
         weights: jnp.array = None,
         spectrum: dl.Spectrum = None,
     ):
@@ -523,11 +526,19 @@ class PointSource(dl.sources.Source):
             The (x, y) on-sky position of this object.
         flux : float, photons = 1.
             The flux of the object.
+        logflux: float
+            Log of the number of photons to prop. Convenient 
+            for MCMC's and fitting processes.
         spectrum : Spectrum = None
             The spectrum of this object, represented by a Spectrum object.
         """
         # Position and Flux
         self.position = jnp.asarray(position, dtype=float)
+
+        if logflux:
+            self.bool_logflux = True
+
+        self.logflux = jnp.asarray(logflux, dtype=float)
         self.flux = jnp.asarray(flux, dtype=float)
 
         if self.position.shape != (2,):
@@ -564,7 +575,12 @@ class PointSource(dl.sources.Source):
             if `return_wf` is False and `return_psf` is True, returns the PSF object.
         """
         self = self.normalise()
-        weights = self.weights * self.flux
+
+        if self.bool_logflux:
+            weights = self.weights * 10**self.logflux
+        else:
+            weights = self.weights * self.flux
+
         return optics.propagate(
             self.wavelengths, self.position, weights, return_wf, return_psf
         )

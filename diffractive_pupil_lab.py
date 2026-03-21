@@ -4,7 +4,27 @@ from matplotlib.colors import PowerNorm
 from skimage import feature
 from decimal import Decimal
 
-date = "11_11_24"
+date = "18_03_2026"
+
+if date == "18_03_2026":
+    fname = "/import/morgana2/gpir9156/toliman/non_glued/18_03_2026_flightmodel/"
+
+    img_names = ["18_03_2026_red_fullframe.npy", 
+                "18_03_2026_green_fullframe.npy",
+                "18_03_2026_broad_fullframe.npy",
+                 ]
+
+    titles = ["Red (633nm)", "Green (520nm)", "Thermal (TOL BP)"]
+
+    eg = np.load(fname + img_names[0])[0]
+    psf_cen = np.unravel_index(np.argmax(eg, axis=None), eg.shape)
+
+    plt.figure()
+    plt.imshow(eg, norm=PowerNorm(gamma=0.5), cmap='inferno')
+    plt.plot(psf_cen[1], psf_cen[0], "wx")
+    plt.colorbar()
+    plt.show()
+
 
 if date == "10_10_24":
     fname = "/Volumes/Morgana2/gpir9156/toliman/diffractive_pupil/"
