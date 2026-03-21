@@ -664,6 +664,71 @@ def rotation_matrix(theta: float):
     """
     return jnp.array([[jnp.cos(theta), jnp.sin(theta)], [-jnp.sin(theta), jnp.cos(theta)]])
 
+class BasisLayer(dl.layers.BasisLayer):
+    """
+    Inherits from dLux BasisLayer, with identical functionality 
+    but additional feature of rotation of the basis by a specified angle.
+
+    ??? abstract "UML"
+        ![UML](../../assets/uml/BasisLayer.png)
+
+    Attributes
+    ----------
+    basis: Union[Array, list]
+        The set of basis vectors. Should in generate be a 3 dimensional array.
+    coefficients: Array
+        The array of coefficients to be applied to each basis vector.
+    as_phase: bool = False
+        Whether to apply the basis as a phase or OPD. If True the output is applied as
+        a phase, else it is applied as an OPD.
+    rotation: Array([float])
+        Single value for rotation of evaluated basis (radians). 
+        Array of shape (1,) 
+    """
+
+    rotation: jnp.array
+
+    def __init__(
+        self: dl.layers.BasisLayer,
+        basis: Array = None,
+        coefficients: Array = None,
+        as_phase: bool = False,
+        rotation: jnp.array = np.array([0.0]),
+    ):
+        """
+        Parameters
+        ----------
+        basis: Union[Array, list]
+            The set of basis vectors. Should in generate be a 3 dimensional array.
+        coefficients: Array
+            The Array of coefficients to be applied to each basis vector.
+        as_phase: bool = False
+            Whether to apply the basis as a phase or OPD. If True the output is applied
+            as a phase, else it is applied as an OPD.
+        rotation: Array([float])
+            Single value for rotation of evalutated basis (radians). 
+            Array of shape (1,). Default 0.0
+        """
+        super().__init__(basis=basis,
+                        coefficients=coefficients,
+                        as_phase=as_phase,
+                        )
+
+        self.rotation = rotation    
+
+
+    def eval_basis(self) -> jnp.array:
+        """
+        Override parent eval_basis()
+        Calculates the dot product of the basis vectors and coefficients.
+
+        Returns
+        -------
+        output : Array
+            The output of the dot product between the basis vectors and coefficients.
+        """ 
+        return dlu.rotate(dlu.eval_basis(self.basis, self.coefficients), self.rotation)
+
 
 class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
 
