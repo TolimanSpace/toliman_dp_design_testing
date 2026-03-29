@@ -274,7 +274,9 @@ class OptimManager():
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
                 simu_psf = model.model()
-                loss = -jax_0_4_24_logpmf(k=data, mu=simu_psf).sum()
+                poiss = -jax_0_4_24_logpmf(k=data, mu=simu_psf)
+                # loss = jnp.sum(poiss)
+                loss = jnp.sum(jnp.where(data<=256, 0, poiss))
                 return loss
         elif str_name=='diff2':
             @zdx.filter_jit
