@@ -308,18 +308,18 @@ class OptimManager():
                 return loss_i*loss_ph
             
         elif str_name=='chi2':
-            # RN = self.loss_fn_kwargs.get('readnoise')
-            mask = self.loss_fn_kwargs.get('data_mask')
+            stdev = self.loss_fn_kwargs.get('stdev')
+            RN = self.loss_fn_kwargs.get('readnoise')
             @zdx.filter_jit
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
                 simu_psf = model.model()
-                # poiss_err = simu_psf**0.5
-                # loss = jnp.nansum(( (data - simu_psf)/(poiss_err**2+RN**2) )**2)
-                # loss = jnp.nansum(( (data - simu_psf)/(RN) )**2 * mask)
-                loss = jnp.nansum(( (data - simu_psf)/(simu_psf**0.5) )**2 * mask)
-
-
+                chi2=((data - simu_psf)/jnp.sqrt(stdev**2+RN**2))**2
+                valid_mask = (
+                    jnp.isfinite(chi2) & 
+                    (data > 256) 
+                )
+                loss = jnp.sum(jnp.where(valid_mask, chi2, 0))
                 return loss
             
         elif str_name=='chi2_poiss':
