@@ -187,10 +187,15 @@ class OptimManager():
             opt_state : optax.OptState
                 The state of the optimiser, used to update the models.
         """
-        updated_models = [zdx.apply_updates(self.models[k], optim.update(grads[k], opt_state)[0]) for k in range(len(self.models))]
-        self.models = updated_models
+        updates_n_opt_state = [optim.update(grads[k], opt_state) for k in range(len(self.models))]
+        updates = [updates_n_opt_state[k][0] for k in range(len(self.models))]
+        new_opt_state= [updates_n_opt_state[k][1] for k in range(len(self.models))][0] # assumes same across models (frames)
+        
 
-        return updated_models
+        updated_models = [zdx.apply_updates(self.models[k], updates[k]) for k in range(len(self.models))]
+        self.models = updated_models
+        
+        return updated_models, new_opt_state
 
     def run_optimisation(self, num_steps: int = 1000):
         """
@@ -208,7 +213,7 @@ class OptimManager():
             individual_losses, net_loss, grads = self.loss_and_grads()
 
             # Update models
-            self.update_models(grads, optim, opt_state);
+            _, opt_state = self.update_models(grads, optim, opt_state);
 
             # store parameters of interest
             self.store_params(net_loss,individual_losses);
@@ -417,9 +422,11 @@ class JointOptimManager():
             opt_state : optax.OptState
                 The state of the optimiser, used to update the models.
         """
-        updated_models = [optim_manager.update_models(grads=grads[i], optim=optim[i], opt_state=opt_state[i]) for i, optim_manager in enumerate(self.OptimManagers)]
+        updated_models_n_opt_state = [optim_manager.update_models(grads=grads[i], optim=optim[i], opt_state=opt_state[i]) for i, optim_manager in enumerate(self.OptimManagers)]
+        updated_models = [updated_models_n_opt_state[k][0] for k in range(len(self.OptimManagers))]
+        updated_opt_state =  [updated_models_n_opt_state[k][1] for k in range(len(self.OptimManagers))]
 
-        return updated_models
+        return updated_models, updated_opt_state
 
     def run_optimisation(self, num_steps: int = 1000):
         """
@@ -438,7 +445,7 @@ class JointOptimManager():
             individual_losses, net_loss, grads = self.loss_and_grads()
 
             # Update models
-            self.models = self.update_models(grads, optims, opt_states)
+            self.models, opt_states = self.update_models(grads, optims, opt_states)
 
             # store parameters of interest
             self.store_params(net_loss, individual_losses);
