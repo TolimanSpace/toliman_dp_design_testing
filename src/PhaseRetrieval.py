@@ -280,8 +280,8 @@ class OptimManager():
             def loss_fn(model, data):
                 simu_psf = model.model()
                 poiss = -jax_0_4_24_logpmf(k=data, mu=simu_psf)
-                # loss = jnp.sum(poiss)
-                loss = jnp.sum(jnp.where(data<=256, 0, poiss))
+                loss = jnp.sum(poiss)
+                # loss = jnp.sum(jnp.where(data<=256, 0, poiss))
                 return loss
         elif str_name=='diff2':
             @zdx.filter_jit
@@ -658,6 +658,76 @@ class TransmissiveLayer(dl.layers.TransmissiveLayer):
         if self.normalise:
             wavefront = wavefront.normalise()
         return wavefront
+
+class PixelBasisTransmissiveLayer(TransmissiveLayer):
+
+    coefficients: jnp.array
+    pixel_locs: jnp.array   
+    n_px: int
+
+    def __init__(self: dl.layers.optical_layers.OpticalLayer,
+            # basis: jnp.array,
+            npix: int,
+            pixel_locs: jnp.array,  
+            coefficients: jnp.array,
+            rotation: jnp.array = np.array([0.0]),
+            **kwargs,
+        ):
+
+        """
+        Parameters
+        ----------
+        basis: Array
+            Array of basis vectors. Should in generate be a 3 dimensional array.
+        npix: int
+            Number of pixels spanning transmissive layer
+        pixel_locs: Array
+            2D array describing the row, col coordinates of the pixels to toggle.
+            This is static after init. 
+        coefficients: Array
+            1D array of coefficients to be applied to each basis vector. 
+        rotation: Array([float])
+            Single value for rotation of transmissive layer (radians).
+        """
+
+        # assert basis.shape[0] == coefficients.shape[0], "Must have the same number of basis vectors as coefficients. \
+        #     Got {} basis vectors and {} coefficients.".format(basis.shape[0], coefficients.shape[0])
+
+        # self.basis = basis
+        assert pixel_locs.shape[0] == coefficients.shape[0], "Must have the same number of pixel locations as coefficients."
+        self.n_px = npix
+        self.pixel_locs = pixel_locs
+        self.coefficients = coefficients
+        # transmission = dlu.eval_basis(self.basis, self.coefficients)
+        transmission = jnp.zeros((self.n_px, self.n_px)).at[self.pixel_locs[:,0], self.pixel_locs[:,1]].set(self.coefficients)
+
+        super().__init__(transmission=transmission,rotation=rotation, **kwargs)
+
+        
+    def calc_transmission(self):
+        t = jnp.zeros((self.n_px, self.n_px)).at[self.pixel_locs[:,0], self.pixel_locs[:,1]].set(self.coefficients)
+        # return dlu.rotate(dlu.eval_basis(self.basis, self.coefficients), self.rotation) 
+        return dlu.rotate(t, self.rotation) 
+
+    def apply(self: dl.layers.optical_layers.OpticalLayer, wavefront: dl.wavefronts.Wavefront) -> dl.wavefronts.Wavefront:
+        """
+        Applies the layer to the wavefront.
+
+        Parameters
+        ----------
+        wavefront : Wavefront
+            The wavefront to operate on.
+
+        Returns
+        -------
+        wavefront : Wavefront
+            The transformed wavefront.
+        """
+        wavefront *= self.calc_transmission()
+        if self.normalise:
+            wavefront = wavefront.normalise()
+        return wavefront
+
 
 # Global useful functions
 def rotation_matrix(theta: float):
