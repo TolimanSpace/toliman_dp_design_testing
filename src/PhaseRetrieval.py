@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from jax import Array
 import numpy as np
 
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 import pickle
@@ -243,9 +243,13 @@ class OptimManager():
             filename : str
                 The name of the file to save the parameters to.
         """
-        
+        # convert to numpy array for storage so we don't get unwanted vram usage for large datasets
+        for k, v in self.param_update_dict.items():
+            self.param_update_dict[k] = np.asarray(v)
+            
         with open(filename, 'wb') as f:
             pickle.dump(self.param_update_dict, f)
+            
         print(f"Stored parameters saved to {filename}")
 
     def calc_CRLB(self, param: str):
