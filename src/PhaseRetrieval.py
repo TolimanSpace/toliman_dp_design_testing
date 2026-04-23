@@ -323,7 +323,10 @@ class OptimManager():
             @zdx.filter_value_and_grad(self.params)
             def loss_fn(model, data):
                 simu_psf = model.model()
-                chi2=((data - simu_psf)/jnp.sqrt(stdev**2+RN**2))**2
+                # chi2=((data - simu_psf)/jnp.sqrt(stdev**2+RN**2))**2
+                poiss_err = simu_psf**0.5
+                chi2=((data - simu_psf)/jnp.sqrt(poiss_err**2+RN**2))**2
+                
                 valid_mask = (
                     jnp.isfinite(chi2) & 
                     (data > 256) 
@@ -1046,7 +1049,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         eval_fn = lambda ap: ap.transmission(self._pixel_coords, self._prim_diam/self._npix)
         leaf_fn = lambda ap: isinstance(ap, dl.layers.apertures.ApertureLayer)
         transmissions = tree_map(eval_fn, apertures, is_leaf=leaf_fn)
-        return dlu.rotate(np.squeeze(np.array(tree_flatten(transmissions)[0])).sum(axis=0), self._pattern_rot)
+        return dlu.rotate(jnp.squeeze(jnp.array(tree_flatten(transmissions)[0])).sum(axis=0), self._pattern_rot)
 
     def update_radii(self):
         """
@@ -1079,7 +1082,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         if self.normalise:
             return wavefront.normalise()
 
-        if self._hex_noll_idxs is not None:
+        if self._ap_noll_idxs is not None:
             # Aberrations
             aberrations = self.eval_basis() 
             wavefront += aberrations #no option to apply as phase
