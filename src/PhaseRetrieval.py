@@ -923,7 +923,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         sub_aperture_list = self.init_sub_apertures()
         self.sub_apertures = dlu.list2dictionary(sub_aperture_list, True, dl.layers.apertures.ApertureLayer) 
 
-        self._pattern_rot = jnp.asarray(pattern_rot)
+        self._pattern_rot = jnp.asarray([pattern_rot], dtype=float)
 
         super().__init__()
 
@@ -990,10 +990,10 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
 
         apertures = self.update_radii()
         # to rotate basis (envelope only and NOT basis axis) we need to rotate the centers of the hexagons
-        rotated_centers = jnp.asarray([jnp.matmul(cen, rotation_matrix(self._pattern_rot)) for cen in  self._ap_centers])
+        rotated_centers = jnp.asarray([jnp.matmul(cen, rotation_matrix(self._pattern_rot.flatten()[0])) for cen in  self._ap_centers])
         aberrated_aps = []
         for i, aper in enumerate(apertures.keys()): 
-            tf = dl.CoordTransform(translation=(rotated_centers[i,0], rotated_centers[i,1]), rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
+            tf = dl.CoordTransform(translation=rotated_centers[i], rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
             aberrated_aps.append(apertures[aper].set("aperture.transformation", tf)) 
 
         # hex_trans = [aper.transmission(self._pixel_coords, self._prim_diam/self._npix) for aper in aberrated_aps] #TODO dlu.rotate
@@ -1045,6 +1045,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
 
     def transmission(self): # pragma: no cover
         apertures = self.update_radii()
+        apertures = self.update_centers(apertures) # carry over radius update
 
         eval_fn = lambda ap: ap.transmission(self._pixel_coords, self._prim_diam/self._npix)
         leaf_fn = lambda ap: isinstance(ap, dl.layers.apertures.ApertureLayer)
@@ -1058,8 +1059,20 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         # Update radii
         # we don't do through each aperturees own function because can't optimise on floats (only arr of floats)
         # and single vector to descibe all segements would be nice here.
+
         return {key: self.sub_apertures[key].set(self._rmax_param, rmax) for key, rmax in zip(self.sub_apertures.keys(), self._rmax)}
-    
+
+    def update_centers(self, apertures):
+        """
+        Updates the center of the apertures and returns new apertures dict.
+
+        Parameters:
+        ---------- 
+        apertures: dict of Aperture objects
+        """
+        # single vector to describe all segments is nice here
+
+        return {key: apertures[key].set("transformation.translation", cen_arr) for key, cen_arr in zip(apertures, self._ap_centers)}
 
     def apply(self: dl.layers.apertures.ApertureLayer, wavefront: dl.wavefronts.Wavefront) -> dl.wavefronts.Wavefront:
         """
