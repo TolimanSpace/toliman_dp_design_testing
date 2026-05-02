@@ -329,7 +329,7 @@ class OptimManager():
                 
                 valid_mask = (
                     jnp.isfinite(chi2) & 
-                    (data > 256) 
+                    (data > 0) 
                 )
                 loss = jnp.sum(jnp.where(valid_mask, chi2, 0))
                 return loss
@@ -857,6 +857,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
     _rmax: jnp.array
     # _rmax_param: str = "rmax" # parameter path to update in sub_apertures
     _rmax_param: str = "radius" # parameter path to update in sub_apertures
+    _compressions: jnp.array
 
 
 
@@ -924,6 +925,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         self.sub_apertures = dlu.list2dictionary(sub_aperture_list, True, dl.layers.apertures.ApertureLayer) 
 
         self._pattern_rot = jnp.asarray([pattern_rot], dtype=float)
+        self._compressions  = jnp.ones(self._ap_centers.shape, dtype=float) 
 
         super().__init__()
 
@@ -993,7 +995,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         rotated_centers = jnp.asarray([jnp.matmul(cen, rotation_matrix(self._pattern_rot.flatten()[0])) for cen in  self._ap_centers])
         aberrated_aps = []
         for i, aper in enumerate(apertures.keys()): 
-            tf = dl.CoordTransform(translation=rotated_centers[i], rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
+            tf = dl.CoordTransform(translation=rotated_centers[i], compression=jnp.array([1.0,1.0]), rotation=0.0) # no segment rotation on axis here to keep basis axis correctly aligned (circle is rotationally symm anyways)
             aberrated_aps.append(apertures[aper].set("aperture.transformation", tf)) 
 
         # hex_trans = [aper.transmission(self._pixel_coords, self._prim_diam/self._npix) for aper in aberrated_aps] #TODO dlu.rotate
@@ -1045,7 +1047,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
 
     def transmission(self): # pragma: no cover
         apertures = self.update_radii()
-        apertures = self.update_centers(apertures) # carry over radius update
+        apertures = self.update_tfs(apertures) # carry over radius update
 
         eval_fn = lambda ap: ap.transmission(self._pixel_coords, self._prim_diam/self._npix)
         leaf_fn = lambda ap: isinstance(ap, dl.layers.apertures.ApertureLayer)
@@ -1062,7 +1064,7 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
 
         return {key: self.sub_apertures[key].set(self._rmax_param, rmax) for key, rmax in zip(self.sub_apertures.keys(), self._rmax)}
 
-    def update_centers(self, apertures):
+    def update_tfs(self, apertures):
         """
         Updates the center of the apertures and returns new apertures dict.
 
@@ -1071,8 +1073,9 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
         apertures: dict of Aperture objects
         """
         # single vector to describe all segments is nice here
+        new_aps = {key: apertures[key].set("transformation.translation", cen_arr) for key, cen_arr in zip(apertures, self._ap_centers)}
 
-        return {key: apertures[key].set("transformation.translation", cen_arr) for key, cen_arr in zip(apertures, self._ap_centers)}
+        return {key: new_aps[key].set("transformation.compression", compress_arr) for key, compress_arr in zip(new_aps, self._compressions)}
 
     def apply(self: dl.layers.apertures.ApertureLayer, wavefront: dl.wavefronts.Wavefront) -> dl.wavefronts.Wavefront:
         """
