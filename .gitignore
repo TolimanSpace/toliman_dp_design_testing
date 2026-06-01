@@ -154,3 +154,11 @@ cython_debug/
 
 # Large Files
 *.stl
+*.png 
+*.npy
+*.csv
+*.pdf 
+*.dat 
+*.txt
+*.svg
+
