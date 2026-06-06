@@ -8,6 +8,7 @@ import zodiax as zdx
 
 import jax.numpy as jnp
 from jax import Array
+from jax import image as jimg
 import numpy as np
 
 from tqdm import tqdm
@@ -800,7 +801,7 @@ class BasisLayer(dl.layers.BasisLayer):
                         as_phase=as_phase,
                         )
 
-        self.rotation = rotation    
+        self.rotation = rotation
 
 
     def eval_basis(self) -> jnp.array:
@@ -1103,6 +1104,131 @@ class DynamicAperture(dl.layers.apertures.BaseDynamicAperture):
             aberrations = self.eval_basis() 
             wavefront += aberrations #no option to apply as phase
 
+        return wavefront
+    
+class BasisOptic(dl.layers.BasisOptic):
+    """
+    inherits from dLux BasisOptic, with identical functionality but 
+    with the addition of transformation (applied to both basis and transmission).
+
+
+    Attributes
+    ----------
+    transmission: Array
+        The Array of transmission values to be applied to the input wavefront.
+    basis: Array, metres
+        Arrays holding the pre-calculated basis vectors.
+    coefficients: Array
+        The Array of coefficients to be applied to each basis vector.
+    as_phase : bool
+        Whether to apply the basis as a phase phase or OPD. If True the basis is
+        applied as a phase, else it is applied as an OPD.
+    normalise : bool
+        Whether to normalise the wavefront after passing through the optic.
+    transformation: dl.CoordTransform
+        The transformation to be applied to the basis and transmission. 
+        Should be a dLux CoordTransform object.
+    """
+
+    tf: dl.CoordTransform = dl.CoordTransform()
+
+    def __init__(
+        self: dl.layers.optical_layers.OpticalLayer,
+        basis,
+        transmission=None,
+        coefficients=None,
+        as_phase=False,
+        normalise=False,
+        transformation=None,
+    ):
+        """
+        Parameters
+        ----------
+        basis: Array, metres
+            Arrays holding the pre-calculated basis vectors.
+        coefficients: Array = None
+            The Array of coefficients to be applied to each basis vector.
+        transmission: Array = None
+            The Array of transmission values to be applied to the input wavefront.
+        as_phase : bool = False
+            Whether to apply the basis as a phase phase or OPD. If True the basis is
+            appl ied as a phase, else it is applied as an OPD.
+        normalise : bool = False
+            Whether to normalise the wavefront after passing through the optic.
+        """
+        super().__init__(
+            transmission=transmission,
+            basis=basis,
+            coefficients=coefficients,
+            as_phase=as_phase,
+            normalise=normalise,
+        )
+
+        self.tf = transformation if transformation is not None else\
+                            dl.CoordTransform(translation=jnp.array([0.0, 0.0]), 
+                                              compression=jnp.array([1.0, 1.0]), 
+                                              rotation=0.0,
+                                              shear=jnp.array([0.0, 0.0]))
+
+    def calculate(self):
+        """
+            atm only considering rotation and compression.
+            NOTE Basis does not rotate, only trans does (by design)
+        """
+        trans, basis = self.transmission, self.eval_basis()
+        
+        # rotation
+        trans = dlu.rotate(trans, self.tf.rotation)
+
+        # compression
+        c_x, c_y = self.tf.compression
+        t_x, t_y = (trans.shape[0]*(1-c_x))/2, (trans.shape[0]*(1-c_y))/2
+        trans = jimg.scale_and_translate(
+                        trans,
+                        shape=trans.shape,
+                        spatial_dims=(0, 1),
+                        scale=jnp.array([c_y, c_x]),
+                        method="linear",
+                        antialias=True,
+                        translation=jnp.array([t_y,t_x]) ,
+                    )
+        basis = jimg.scale_and_translate(
+                        basis,
+                        shape=trans.shape,
+                        spatial_dims=(0, 1),
+                        scale=jnp.array([c_y, c_x]),
+                        method="linear",
+                        antialias=True,
+                        translation=jnp.array([t_y,t_x]) ,
+                    )
+
+
+        return trans, basis
+
+    def apply(self: dl.layers.optical_layers.OpticalLayer, wavefront: dl.wavefronts.Wavefront) -> dl.wavefronts.Wavefront:
+        """
+        Applies the layer to the wavefront.
+
+        Parameters
+        ----------
+        wavefront : Wavefront
+            The wavefront to operate on.
+
+        Returns
+        -------
+        wavefront : Wavefront
+            The transformed wavefront.
+        """
+        transmission, basis = self.calculate()
+        wavefront *= transmission
+
+        if self.as_phase:
+            wavefront = wavefront.add_phase(basis)
+        else:
+            wavefront += basis
+
+        if self.normalise:
+            wavefront = wavefront.normalise()
         return wavefront
     
 class ParametricOpticalSystem(dl.optical_systems.OpticalSystem):
