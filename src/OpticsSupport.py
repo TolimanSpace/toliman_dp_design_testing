@@ -57,6 +57,10 @@ class HelperFunctions:
             amplitude * np.cos(B * Y + np.pi)
             + amplitude * np.cos(B * X + np.pi)
         ) / 4
+        # grating = (amplitude * ((np.cos(B * Y) > 0)*2-1) + amplitude * ((np.cos(B * X) > 0)*2-1)) / 4
+        # anti_grating = (
+        #     amplitude * ((np.cos(B * Y + np.pi) > 0)*2-1) + amplitude * ((np.cos(B * X + np.pi) > 0)*2-1)
+        # ) / 4
 
         # grating = (amplitude * np.cos(B * X))/4
         # anti_grating = (
@@ -185,6 +189,21 @@ class HelperFunctions:
         AGmask = anti_grating.at[np.where(mask != 0)].set(0.0)
         # AGmask = grating.at[np.where(mask != 0)].set(0.0)
         full_grating = Gmask + AGmask
+        # print(np.sqrt(np.mean(full_grating**2)))
+
+        # tile_top = np.concatenate((np.ones((100,100)), -np.ones((100,100))), axis=1)
+        # tile_bottom = np.concatenate((-np.ones((100,100)), np.ones((100,100))), axis=1)
+        # tile = np.concatenate((tile_top, tile_bottom), axis=0)
+        # tile_grating = tile * np.sqrt(np.mean(full_grating**2))
+        # grating = np.tile(
+        #     tile_grating,
+        #     (full_grating.shape[0] // tile_grating.shape[0]+1, full_grating.shape[1] // tile_grating.shape[1] + 1),
+        # )[:full_grating.shape[0],:full_grating.shape[1]]
+        # anti_grating = -grating
+        # full_grating = grating.at[np.where(mask == 0)].set(0.0) + anti_grating.at[np.where(mask != 0)].set(0.0)
+
+        # full_grating = np.sqrt(np.mean(full_grating**2)) * ((full_grating > 0) * 2 - 1)
+        #full_grating = np.sqrt(np.mean(full_grating**2)) * np.ones(full_grating.shape)
         np.save("full_grating.npy", full_grating)
         full_grating -= full_grating.min()
         full_mask = mask + full_grating
@@ -235,9 +254,10 @@ class HelperFunctions:
         amplitude: float,
         det_npixels: int,
         pixel_scale: float,
-        max_reach: float,
+        # max_reach: float,
         n1: float,
         n2: float,
+        period: float,
         out: float = np.nan,
         apply_spiders: bool = True,
         return_raw: bool = False,
@@ -296,17 +316,17 @@ class HelperFunctions:
         )
 
         # Calculate grating period
-        period = HelperFunctions.calculate_grating_period(
-            max_reach,
-            pixel_scale,
-            det_npixels,
-            wavelengths,
-            aperture_diameter,
-            aperture_npix,
-        )
+        # period = HelperFunctions.calculate_grating_period(
+        #     max_reach,
+        #     pixel_scale,
+        #     det_npixels,
+        #     wavelengths,
+        #     aperture_diameter,
+        #     aperture_npix,
+        # )
         amplitude_rads = (2* amplitude * (n2-n1))/ wavelengths.mean()
         print(f"Grating amplitude (nm): {amplitude*1e9}nm")
-        print(f"Grating amplitude (rads): {amplitude_rads}$\pi$ rads")
+        print(f"Grating amplitude (rads): {amplitude_rads}pi rads")
         print(f"Grating period: {period}m")
 
         # Create Grating
