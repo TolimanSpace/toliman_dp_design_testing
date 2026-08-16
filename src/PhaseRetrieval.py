@@ -328,11 +328,12 @@ class OptimManager():
                 poiss_err = simu_psf**0.5
                 chi2=((data - simu_psf)/jnp.sqrt(poiss_err**2+RN**2))**2
                 
-                valid_mask = (
-                    jnp.isfinite(chi2) & 
-                    (data > 0) 
-                )
-                loss = jnp.sum(jnp.where(valid_mask, chi2, 0))
+                # valid_mask = (
+                #     jnp.isfinite(chi2) & 
+                #     (data > 0) 
+                # )
+                # loss = jnp.sum(jnp.where(valid_mask, chi2, 0))
+                loss = chi2.sum()
                 return loss
             
         elif str_name=='chi2_poiss':
